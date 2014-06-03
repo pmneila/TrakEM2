@@ -41,11 +41,14 @@ import java.awt.Rectangle;
 import java.awt.Stroke;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.NoninvertibleTransformException;
 import java.awt.geom.Point2D;
+import java.awt.RadialGradientPaint;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -69,7 +72,15 @@ public class Ball extends ZDisplayable implements VectorData {
 
 	/** Every new Ball will have, for its first point, the last user-adjusted radius value or the radius of the last user-selected point. */
 	static private double last_radius = -1;
-
+	
+	// Gradient colors
+	private static final Color[] gradient_colors = new Color[] {Color.RED,
+										 new Color(1.f, 0.5f, 0.f, 0.85f),
+										 new Color(1.f, 1.f, 0.f, 0.7f),
+										 new Color(0.f, 1.f, 0.5f, 0.5f),
+										 new Color(0.f, 0.f, 1.f, 0.3f)};
+	private static final float[] gradient_fractions = new float[] {0.15402f, 0.318814f, 0.5116704f, 0.779129f, 1.0f};
+	
 	/** Paint as outlines (false) or as solid areas (true; default, with a default alpha of 0.4f).*/
 	private boolean fill_paint = true;
 
@@ -140,14 +151,28 @@ public class Ball extends ZDisplayable implements VectorData {
 	/**Find a point in an array, with a precision dependent on the magnification.*/
 	protected int findPoint(double[][] a, int x_p, int y_p, double magnification, final long lid) {
 		int index = -1;
-		double d = (10.0D / magnification);
-		if (d < 4) d = 4;
+		
+		final Layer current_layer = layer_set.getLayer(lid);
+		
+		double min_distance = Double.MAX_VALUE;
+		
 		for (int i=0; i<n_points; i++) {
-			if (p_layer[i] != lid) continue;
-			if ((Math.abs(x_p - a[0][i]) + Math.abs(y_p - a[1][i])) <= p_width[i]) {
+			final Layer point_layer = layer_set.getLayer(p_layer[i]);
+			double depth = Math.abs(current_layer.getZ() - point_layer.getZ());
+			
+			if (depth > p_width[i]) continue;
+			
+			double dx = x_p - a[0][i];
+			double dy = y_p - a[1][i];
+			
+			double sq_distance = dx*dx + dy*dy + depth*depth;
+			
+			if (sq_distance <= p_width[i]*p_width[i] && sq_distance < min_distance) {
 				index = i;
+				min_distance = sq_distance;
 			}
 		}
+		
 		return index;
 	}
 	/**Remove a point.*/
@@ -178,7 +203,7 @@ public class Ball extends ZDisplayable implements VectorData {
 	}
 
 	/**Move backbone point by the given deltas.*/
-	private void dragPoint(int index, int dx, int dy) {
+	private void dragPoint(int index, double dx, double dy) {
 		p[0][index] += dx;
 		p[1][index] += dy;
 	}
@@ -207,7 +232,36 @@ public class Ball extends ZDisplayable implements VectorData {
 		updateInDatabase(new StringBuilder("INSERT INTO ab_ball_points (ball_id, x, y, width, layer_id) VALUES (").append(id).append(",").append(x_p).append(",").append(y_p).append(",").append(p_width[index]).append(",").append(layer_id).append(")").toString());
 		return index;
 	}
-
+	
+	private static float[] sliceFractions(float sliceDistance)
+	{
+		List<Float> fractions = new ArrayList<Float>();
+		
+		float last = gradient_fractions[gradient_fractions.length - 1] - sliceDistance;
+		if(last <= 0)
+		{
+			return new float[0];
+		}
+		
+		for(float fraction : gradient_fractions)
+		{
+			float r = (fraction - sliceDistance) / last;
+			if(r <= 0 && fractions.isEmpty())
+				fractions.add(0.f);
+			if(r > 0)
+				fractions.add(r);
+		}
+		
+		float[] res = new float[fractions.size()];
+		int i = 0;
+		for(Float f : fractions)
+		{
+			res[i++] = (f != null ? f : 0.f);
+		}
+		
+		return res;
+	}
+	
 	@Override
 	public void paint(final Graphics2D g, final Rectangle srcRect, final double magnification, final boolean active, final int channels, final Layer active_layer, final List<Layer> layers) {
 		if (0 == n_points) return;
@@ -218,9 +272,8 @@ public class Ball extends ZDisplayable implements VectorData {
 		//arrange transparency
 		final Composite original_composite = g.getComposite(),
 				perimeter_composite = alpha == 1.0f ? original_composite : AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha),
-				area_composite = fill_paint ? (alpha > 0.4f ? AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.4f) : perimeter_composite)
-							    : null;
-
+				area_composite = perimeter_composite; //fill_paint ? (alpha > 0.4f ? AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.4f) : perimeter_composite) : null;
+		
 		// Clear transform and stroke
 		final AffineTransform gt = g.getTransform();
 		g.setTransform(DisplayCanvas.DEFAULT_AFFINE);
@@ -255,16 +308,25 @@ public class Ball extends ZDisplayable implements VectorData {
 		for (int j=0; j<n_points; j++) {
 			if (active_lid == p_layer[j]) {
 				g.setColor(this.color);
-				final int radius = (int)p_width[j];
-				final int x = (int)((p[0][j] -radius -srcRect.x) * magnification),
-				          y = (int)((p[1][j] -radius -srcRect.y) * magnification),
-					  w = (int)(2 * radius * magnification);
+				final double radius = p_width[j];
+				Point2D center = new Point2D.Double((p[0][j]-srcRect.x) * magnification,
+												   (p[1][j]-srcRect.y) * magnification);
+				final double real_radius = radius * magnification;
+				final int x = (int)Math.round(center.getX() - real_radius),
+				          y = (int)Math.round(center.getY() - real_radius),
+					  	  w = (int)Math.round(2 * real_radius);
 				if (fill_paint) {
+					RadialGradientPaint gradient = new RadialGradientPaint(center, (float)real_radius,
+							gradient_fractions,
+							gradient_colors);
+					g.setPaint(gradient);
 					g.setComposite(area_composite);
 					g.fillOval(x, y, w, w);
 				}
-				g.setComposite(perimeter_composite);
-				g.drawOval(x, y, w, w);
+				/*else*/ {
+					g.setComposite(perimeter_composite);
+					g.drawOval(x, y, w, w);
+				}
 			} else if (color_cues) {
 				boolean can_paint = -1 == n_layers_color_cue;
 				final Layer layer = layer_set.getLayer(p_layer[j]); // fast: map lookup
@@ -282,16 +344,24 @@ public class Ball extends ZDisplayable implements VectorData {
 						if (z < current_layer_z) g.setColor(below);
 						else g.setColor(above);
 						// h^2 = sin^2 + cos^2 ---> p_width[j] is h, and sin*h is depth
-						final int slice_radius = (int)(p_width[j] * Math.sqrt(1 - Math.pow(depth/p_width[j], 2)));
-						final int x = (int)((p[0][j] -slice_radius -srcRect.x) * magnification),
-							  y = (int)((p[1][j] -slice_radius -srcRect.y) * magnification),
-							  w = (int)(2 * slice_radius * magnification);
+						Point2D center = new Point2D.Double((p[0][j]-srcRect.x) * magnification,
+								   (p[1][j]-srcRect.y) * magnification);
+						final double slice_radius = (p_width[j] * Math.sqrt(1 - Math.pow(depth/p_width[j], 2))) * magnification;
+						final int x = (int)Math.round(center.getX() - slice_radius),
+						          y = (int)Math.round(center.getY() - slice_radius),
+							  	  w = (int)Math.round(2 * slice_radius);
 						if (fill_paint) {
+							float[] fractions = sliceFractions((float)(depth/this.p_width[j]));
+							RadialGradientPaint gradient = new RadialGradientPaint(center, (float)slice_radius,
+								fractions, Arrays.copyOfRange(gradient_colors, gradient_colors.length - fractions.length, gradient_colors.length));
+							g.setPaint(gradient);
 							g.setComposite(area_composite);
 							g.fillOval(x, y, w, w);
 						}
-						g.setComposite(perimeter_composite);
-						g.drawOval(x, y, w, w);
+						/*else*/ {
+							g.setComposite(perimeter_composite);
+							g.drawOval(x, y, w, w);
+						}
 					}
 				}
 			}
@@ -324,7 +394,7 @@ public class Ball extends ZDisplayable implements VectorData {
 	public void mousePressed(MouseEvent me, Layer layer, int x_p, int y_p, double mag) {
 		// transform the x_p, y_p to the local coordinates
 		if (!this.at.isIdentity()) {
-			final Point2D.Double po = inverseTransformPoint(x_p, y_p);
+			final Point2D.Double po = inverseTransformPoint(x_p+1, y_p+1);
 			x_p = (int)po.x;
 			y_p = (int)po.y;
 		}
@@ -333,57 +403,62 @@ public class Ball extends ZDisplayable implements VectorData {
 
 		if (ProjectToolbar.PEN == tool) {
 			long layer_id = layer.getId();
-			if (Utils.isControlDown(me) && me.isShiftDown()) {
-				index = findNearestPoint(p, p_layer, n_points, x_p, y_p, layer.getId()); // should go to an AbstractProfile or something
-			} else {
-				index = findPoint(p, x_p, y_p, mag, layer.getId());
-			}
+			index = findPoint(p, x_p, y_p, mag, layer.getId());
 			if (-1 != index) {
-				if (layer_id == p_layer[index]) {
-					if (Utils.isControlDown(me) && me.isShiftDown() && p_layer[index] == Display.getFrontLayer().getId()) {
-						removePoint(index);
-						index = -1; // to prevent saving in the database twice
-						repaint(false, layer);
-						return;
-					}
-				} else index = -1; // disable if not in the front layer (so a new point will be added)
-				if (-1 != index) {
-					// Make the radius for newly added balls that of the last selected 
-					last_radius = p_width[index];
+				
+				if (Utils.isControlDown(me) && me.isShiftDown() && p_layer[index] == Display.getFrontLayer().getId()) {
+					removePoint(index);
+					index = -1; // to prevent saving in the database twice
+					repaint(false, layer);
+					return;
 				}
+				
+				last_radius = p_width[index];
 			}
-			if (-1 == index) {
+			else {
+				// If any modifier is pressed, do nothing.
+				if(Utils.isControlDown(me) || me.isShiftDown())
+					return;
+				
 				index = addPoint(x_p, y_p, layer_id, (0 == n_points ? Ball.getFirstWidth() : p_width[n_points -1])); // either 10 screen pixels or the same as the last point
 				repaint(false, layer);
 			}
 		}
 	}
 
-	public void mouseDragged(MouseEvent me, Layer layer, int x_p, int y_p, int x_d, int y_d, int x_d_old, int y_d_old) {
+	public void mouseDragged(MouseEvent me, Layer layer, int _x_p, int _y_p, int _x_d, int _y_d, int _x_d_old, int _y_d_old) {
 		// transform to the local coordinates
+		
+		double x_p = _x_p;
+		double y_p = _y_p;
+		double x_d = _x_d;
+		double y_d = _y_d;
+		double x_d_old = _x_d_old;
+		double y_d_old = _y_d_old;
+		
 		if (!this.at.isIdentity()) {
 			final Point2D.Double p = inverseTransformPoint(x_p, y_p);
-			x_p = (int)p.x;
-			y_p = (int)p.y;
+			x_p = p.x;
+			y_p = p.y;
 			final Point2D.Double pd = inverseTransformPoint(x_d, y_d);
-			x_d = (int)pd.x;
-			y_d = (int)pd.y;
+			x_d = pd.x;
+			y_d = pd.y;
 			final Point2D.Double pdo = inverseTransformPoint(x_d_old, y_d_old);
-			x_d_old = (int)pdo.x;
-			y_d_old = (int)pdo.y;
+			x_d_old = pdo.x;
+			y_d_old = pdo.y;
 		}
-
+		
 		final int tool = ProjectToolbar.getToolId();
 
 		if (ProjectToolbar.PEN == tool) {
 			if (-1 != index) {
-				if (me.isShiftDown()) {
+				/*if (me.isShiftDown()) {
 					p_width[index] = Math.sqrt((x_d - p[0][index])*(x_d - p[0][index]) + (y_d - p[1][index])*(y_d - p[1][index]));
 					last_radius = p_width[index];
 					Utils.showStatus("radius: " + p_width[index], false);
-				} else {
-					dragPoint(index, x_d - x_d_old, y_d - y_d_old);
-				}
+				} else {*/
+				dragPoint(index, x_d - x_d_old, y_d - y_d_old);
+				//}
 				repaint(false, layer);
 			}
 		}
@@ -404,6 +479,36 @@ public class Ball extends ZDisplayable implements VectorData {
 		// reset
 		index = -1;
 		repaint(true, layer);
+	}
+	
+	public void mouseWheelMoved(MouseWheelEvent mwe, Display display)
+	{
+		// Utils.logMany2("Mouse wheel!");
+		if(-1 == index)
+			return;
+		
+		final int modifiers = mwe.getModifiers();
+		final int rotation = mwe.getWheelRotation();
+		
+		if(mwe.isShiftDown())
+		{
+			double step_radius = 0.05 * p_width[index];
+			p_width[index] += rotation * step_radius;
+			Utils.showStatus("radius: " + p_width[index], false);
+			repaint(false, display.getLayer());
+		}
+		else
+		{
+			if (rotation > 0)
+				display.nextLayer(modifiers);
+			else
+				display.previousLayer(modifiers);
+			
+			repaint(false, display.getLayer());
+			
+			final Layer newLayer = display.getLayer();
+			p_layer[index] = newLayer.getId();
+		}
 	}
 	
 	@Override

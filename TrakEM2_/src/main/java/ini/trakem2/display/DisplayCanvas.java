@@ -2240,7 +2240,7 @@ public final class DisplayCanvas extends ImageCanvas implements KeyListener/*, F
 	 * - Inkscape: control+wheel to zoom (apple+wheel in macosx, since control+wheel zooms desktop)
 	 */
 	public void mouseWheelMoved(MouseWheelEvent mwe) {
-		if (dragging) return; // prevent unexpected mouse wheel movements
+		// if (dragging) return; // prevent unexpected mouse wheel movements
 		final int modifiers = mwe.getModifiers();
 		final int rotation = mwe.getWheelRotation();
 		final int tool = ProjectToolbar.getToolId();
@@ -2340,7 +2340,7 @@ public final class DisplayCanvas extends ImageCanvas implements KeyListener/*, F
 			else display.previousLayer(modifiers);
 		} else if (null != display.getActive()) {
 			// forward to active
-			display.getActive().mouseWheelMoved(mwe);
+			display.getActive().mouseWheelMoved(mwe, display);
 		}
 	}
 

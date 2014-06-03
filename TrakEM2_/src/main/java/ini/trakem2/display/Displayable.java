@@ -68,7 +68,7 @@ import java.util.Set;
 
 /** The class that any element to be drawn on a Display must extend. */
 public abstract class Displayable extends DBObject implements Paintable  {
-	
+
 	final static protected String[] compositeModes = new String[]{
 		"Normal",
 		"Add",
@@ -734,7 +734,7 @@ public abstract class Displayable extends DBObject implements Paintable  {
 	}
 
 	/** Does nothing unless overriden. */
-	public void mouseWheelMoved(MouseWheelEvent mwe) {}
+	public void mouseWheelMoved(MouseWheelEvent mwe, Display display) {}
 
 	public void keyPressed(KeyEvent ke) {
 
