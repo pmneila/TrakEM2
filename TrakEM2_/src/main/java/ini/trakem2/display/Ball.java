@@ -291,15 +291,6 @@ public class Ball extends ZDisplayable implements VectorData {
 		}
 
 		final boolean color_cues = layer_set.color_cues;
-		final int n_layers_color_cue = layer_set.n_layers_color_cue;
-		final Color below, above;
-		if (layer_set.use_color_cue_colors) {
-			below = Color.red;
-			above = Color.blue;
-		} else {
-			below = this.color;
-			above = this.color;
-		}
 
 		// Paint a sliced sphere
 		final double current_layer_z = active_layer.getZ();
@@ -307,7 +298,6 @@ public class Ball extends ZDisplayable implements VectorData {
 		final long active_lid = active_layer.getId();
 		for (int j=0; j<n_points; j++) {
 			if (active_lid == p_layer[j]) {
-				g.setColor(this.color);
 				final double radius = p_width[j];
 				Point2D center = new Point2D.Double((p[0][j]-srcRect.x) * magnification,
 												   (p[1][j]-srcRect.y) * magnification);
@@ -324,44 +314,38 @@ public class Ball extends ZDisplayable implements VectorData {
 					g.fillOval(x, y, w, w);
 				}
 				/*else*/ {
+					g.setColor(this.color);
 					g.setComposite(perimeter_composite);
 					g.drawOval(x, y, w, w);
 				}
 			} else if (color_cues) {
-				boolean can_paint = -1 == n_layers_color_cue;
 				final Layer layer = layer_set.getLayer(p_layer[j]); // fast: map lookup
-				if (!can_paint) {
-					can_paint = Math.abs(current_layer_index - layer_set.indexOf(layer)) <= n_layers_color_cue; // fast: map lookup
-				}
-				// Check if p_layer[j] is within the range of layers to color cue:
-				//Utils.logMany2("current_layer_index: ", current_layer_index, "layer index:", layer_set.indexOf(layer), "n_layers_color_cue", n_layers_color_cue);
-				if (can_paint) {
-					// does the point intersect with the layer?
-					final double z = layer.getZ();
-					final double depth = Math.abs(current_layer_z - z);
-					if (depth < this.p_width[j]) { // compare with untransformed data, in pixels!
-						// intersects!
-						if (z < current_layer_z) g.setColor(below);
-						else g.setColor(above);
-						// h^2 = sin^2 + cos^2 ---> p_width[j] is h, and sin*h is depth
-						Point2D center = new Point2D.Double((p[0][j]-srcRect.x) * magnification,
-								   (p[1][j]-srcRect.y) * magnification);
-						final double slice_radius = (p_width[j] * Math.sqrt(1 - Math.pow(depth/p_width[j], 2))) * magnification;
-						final int x = (int)Math.round(center.getX() - slice_radius),
-						          y = (int)Math.round(center.getY() - slice_radius),
-							  	  w = (int)Math.round(2 * slice_radius);
-						if (fill_paint) {
-							float[] fractions = sliceFractions((float)(depth/this.p_width[j]));
-							RadialGradientPaint gradient = new RadialGradientPaint(center, (float)slice_radius,
-								fractions, Arrays.copyOfRange(gradient_colors, gradient_colors.length - fractions.length, gradient_colors.length));
-							g.setPaint(gradient);
-							g.setComposite(area_composite);
-							g.fillOval(x, y, w, w);
-						}
-						/*else*/ {
-							g.setComposite(perimeter_composite);
-							g.drawOval(x, y, w, w);
-						}
+				// does the point intersect with the layer?
+				final double z = layer.getZ();
+				final double depth = Math.abs(current_layer_z - z);
+				if (depth < this.p_width[j]) { // compare with untransformed data, in pixels!
+					// intersects!
+					// if (z < current_layer_z) g.setColor(below);
+					// else g.setColor(above);
+					// h^2 = sin^2 + cos^2 ---> p_width[j] is h, and sin*h is depth
+					Point2D center = new Point2D.Double((p[0][j]-srcRect.x) * magnification,
+							   (p[1][j]-srcRect.y) * magnification);
+					final double slice_radius = (p_width[j] * Math.sqrt(1 - Math.pow(depth/p_width[j], 2))) * magnification;
+					final int x = (int)Math.round(center.getX() - slice_radius),
+					          y = (int)Math.round(center.getY() - slice_radius),
+						  	  w = (int)Math.round(2 * slice_radius);
+					if (fill_paint) {
+						float[] fractions = sliceFractions((float)(depth/this.p_width[j]));
+						RadialGradientPaint gradient = new RadialGradientPaint(center, (float)slice_radius,
+							fractions, Arrays.copyOfRange(gradient_colors, gradient_colors.length - fractions.length, gradient_colors.length));
+						g.setPaint(gradient);
+						g.setComposite(area_composite);
+						g.fillOval(x, y, w, w);
+					}
+					/*else*/ {
+						g.setColor(this.color);
+						g.setComposite(perimeter_composite);
+						g.drawOval(x, y, w, w);
 					}
 				}
 			}
